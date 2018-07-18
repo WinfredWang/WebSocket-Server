@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+
+<body>
+    <script>
+        var ws = new WebSocket('ws://localhost:8124');
+        ws.onopen = function () {
+            console.log('connected');
+            ws.send('Hello World!');
+        }
+
+        ws.onmessage = function (e) {
+            console.log('Accept message, data:' + e.data);
+        }
+
+        ws.onclose = function(e) {
+            console.log('closed', e);
+        }
+
+        ws.onerror = function(e) {
+            console.log('error', e);
+        }
+    </script>
+</body>
+
+</html>
