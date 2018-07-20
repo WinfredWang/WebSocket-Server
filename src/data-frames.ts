@@ -1,39 +1,41 @@
-import { NodeStringDecoder } from "string_decoder";
+import { IDataFrame, OPCODE, ICloseFrame } from './typings';
 
-export interface IDataFrame {
-    fin: number;
-    rsv1?: number;
-    rsv2?: number;
-    rsv3?: number;
-    opcode: number;
-    mask: number;
-    payloadLen?: number;
-    extendPayloadLen?: number;
-    maskKey?: Buffer;
-    payloadData?: Buffer;
+function strToHex(content: string) {
+    return parseInt(content).toString(16); // 1001 -> 3e9
+}
+
+function int2Buf(n: number, bufSize: number) {
+    let hex = strToHex(n + "");
+    const buf = Buffer.allocUnsafe(bufSize);
+    buf.writeUIntBE(parseInt(hex, 16), 0, bufSize);
+    return buf;
 }
 
 export class DataFrame {
 
-    static decode(data: Buffer): IDataFrame {
+    static getRequestHeaders(data: Buffer): IDataFrame {
         // 解析第一个字节
         let fin = data[0] >> 7, opcode = data[0] & 0xF,
             mask = data[1] >> 7, payloadLen = data[1] & 0x7F;
 
-        let dataFrame: IDataFrame = {
+        return {
             fin: fin,
             opcode: opcode,
             mask: mask,
             payloadLen: payloadLen
         };
+    }
+
+    static decode(data: Buffer): IDataFrame {
+        let dataFrame = this.getRequestHeaders(data);
 
         let payloadData = null,
             maskKey = null,
             finalPayloadLen = null;
 
         // mask是1时，maskkey占用4个字节，否则没有
-        let masklength;
-        mask == 1 ? (masklength = 4) : (masklength = 0)
+        let masklength, payloadLen = dataFrame.payloadLen;
+        dataFrame.mask == 1 ? (masklength = 4) : (masklength = 0)
 
         if (payloadLen <= 125) {
             payloadData = data.slice(masklength + 2);
@@ -50,50 +52,59 @@ export class DataFrame {
         }
 
         let realData = [];
-        if (mask == 1) {
+        if (dataFrame.mask == 1) {
             for (let i = 0, j = 0; i < payloadData.length; i++ , j++) {
                 j == 4 && (j = 0);
                 realData.push(payloadData[i] ^ maskKey[j]);
             }
-            dataFrame.payloadData = Buffer.from(realData);
+            dataFrame.payload = Buffer.from(realData);
         } else {
-            dataFrame.payloadData = payloadData;
+            dataFrame.payload = payloadData;
         }
         return dataFrame;
     }
 
     static encodeText(content: string) {
-
-        return this.encode({ fin: 1, opcode: 1, mask: 0, payloadData: Buffer.from(content, "utf-8") });
+        return this.encode({ fin: 1, opcode: OPCODE.TEXT, mask: 0, payload: Buffer.from(content) });
     }
 
-    static close(reason: string) {
-        return this.encode({ fin: 1, opcode: 8, mask: 0, payloadData: Buffer.from(reason, "utf-8") });
+    static ping(): Buffer {
+        return this.encode({ fin: 1, opcode: OPCODE.PING, mask: 0 });
+    }
+
+    static pong(): Buffer {
+        return this.encode({ fin: 1, opcode: OPCODE.PONG, mask: 0 });
+    }
+
+    static close(frame: ICloseFrame): Buffer {
+        let reason = Buffer.from(frame.reason);
+        const codeBuf = int2Buf(frame.code, 2);
+        return this.encode({ fin: 1, opcode: OPCODE.CLOSE, mask: 0, payload: Buffer.concat([codeBuf, reason], reason.length + codeBuf.length) });
     }
 
     static encode(dataFrame: IDataFrame): Buffer {
         let byte = (dataFrame.fin << 7) | dataFrame.opcode;
-        let fByte = byte.toString(16);
-        let buffer;
+        let buf: Buffer;
 
-        if (dataFrame.payloadData) {
-            if (dataFrame.payloadData.length <= 125) {
-                buffer = Buffer.from([fByte, dataFrame.payloadData.length.toString(16)]);
-            } else if (dataFrame.payloadData.length <= 65535) {
-                let payloadLen = parseInt("126").toString(16);
-                let extendPayloadLen = dataFrame.payloadData.length.toString(16);
-                buffer = Buffer.from([fByte, payloadLen, extendPayloadLen]);
-            } else {
-                let payloadLen = parseInt("127").toString(16);
-                let extendPayloadLen = dataFrame.payloadData.length.toString(16); // 3位byte情况如何处理
-                buffer = Buffer.from([fByte, payloadLen, extendPayloadLen]);
+        if (dataFrame.payload) {
+            let headerBuf;
+            let payloadLen = dataFrame.payload.length;
+            if (payloadLen <= 125) {
+                headerBuf = Buffer.from([byte, payloadLen]);
+            } else if (payloadLen <= 65535) { // 16bit
+                headerBuf = Buffer.from([byte, 126]);
+                let extendPayloadLen = int2Buf(payloadLen, 2);
+                headerBuf = Buffer.concat([headerBuf, extendPayloadLen], extendPayloadLen.length + headerBuf.length);
+            } else { // 64bit
+                headerBuf = Buffer.from([byte, 127]);
+                let extendPayloadLen = int2Buf(payloadLen, 8);
+                headerBuf = Buffer.concat([headerBuf, extendPayloadLen], extendPayloadLen.length + headerBuf.length);
             }
-
-            buffer = Buffer.concat([buffer, dataFrame.payloadData], buffer.length + dataFrame.payloadData.length);
+            buf = Buffer.concat([headerBuf, dataFrame.payload], payloadLen + headerBuf.length);
         } else {
-            buffer = Buffer.from(fByte);
+            buf = Buffer.from([byte]);
         }
 
-        return buffer;
+        return buf;
     }
 }
