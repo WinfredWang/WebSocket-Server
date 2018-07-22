@@ -1,19 +1,19 @@
 import { IDataFrame, OPCODE, ICloseFrame } from './typings';
 
-function strToHex(content: string) {
-    return parseInt(content).toString(16); // 1001 -> 3e9
-}
-
+/**
+ * 将整数转化成占n个的buffer
+ * @param n 
+ * @param bufSize 
+ */
 function int2Buf(n: number, bufSize: number) {
-    let hex = strToHex(n + "");
+    let hex = parseInt(n + "").toString(16);
     const buf = Buffer.allocUnsafe(bufSize);
     buf.writeUIntBE(parseInt(hex, 16), 0, bufSize);
     return buf;
 }
 
-export class DataFrame {
-
-    static getRequestHeaders(data: Buffer): IDataFrame {
+export class Frame {
+    static parseHeader(data: Buffer): IDataFrame {
         // 解析第一个字节
         let fin = data[0] >> 7, opcode = data[0] & 0xF,
             mask = data[1] >> 7, payloadLen = data[1] & 0x7F;
@@ -26,9 +26,8 @@ export class DataFrame {
         };
     }
 
-    static decode(data: Buffer): IDataFrame {
-        let dataFrame = this.getRequestHeaders(data);
-
+    static parse(data: Buffer): IDataFrame {
+        let dataFrame = this.parseHeader(data);
         let payloadData = null,
             maskKey = null,
             finalPayloadLen = null;
@@ -64,25 +63,29 @@ export class DataFrame {
         return dataFrame;
     }
 
-    static encodeText(content: string) {
-        return this.encode({ fin: 1, opcode: OPCODE.TEXT, mask: 0, payload: Buffer.from(content) });
+    static binary(content: Buffer) {
+        return this.create({ fin: 1, opcode: OPCODE.BINARY, mask: 0, payload: content });
+    }
+
+    static text(content: string) {
+        return this.create({ fin: 1, opcode: OPCODE.TEXT, mask: 0, payload: Buffer.from(content) });
     }
 
     static ping(): Buffer {
-        return this.encode({ fin: 1, opcode: OPCODE.PING, mask: 0 });
+        return this.create({ fin: 1, opcode: OPCODE.PING, mask: 0 });
     }
 
     static pong(): Buffer {
-        return this.encode({ fin: 1, opcode: OPCODE.PONG, mask: 0 });
+        return this.create({ fin: 1, opcode: OPCODE.PONG, mask: 0 });
     }
 
     static close(frame: ICloseFrame): Buffer {
         let reason = Buffer.from(frame.reason);
         const codeBuf = int2Buf(frame.code, 2);
-        return this.encode({ fin: 1, opcode: OPCODE.CLOSE, mask: 0, payload: Buffer.concat([codeBuf, reason], reason.length + codeBuf.length) });
+        return this.create({ fin: 1, opcode: OPCODE.CLOSE, mask: 0, payload: Buffer.concat([codeBuf, reason], reason.length + codeBuf.length) });
     }
 
-    static encode(dataFrame: IDataFrame): Buffer {
+    static create(dataFrame: IDataFrame): Buffer {
         let byte = (dataFrame.fin << 7) | dataFrame.opcode;
         let buf: Buffer;
 
