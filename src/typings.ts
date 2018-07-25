@@ -1,3 +1,5 @@
+import * as http from 'http';
+
 export enum OPCODE {
     CONTINUE = 0,
     TEXT = 1,
@@ -23,4 +25,5 @@ export interface ICloseFrame {
 export interface IConfig {
 
     port?: number;
+    httpServer?: http.Server;
 }

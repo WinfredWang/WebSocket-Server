@@ -1,4 +1,5 @@
 import * as net from 'net';
+import * as http from 'http';
 import * as crypto from 'crypto';
 import { Frame } from './frame';
 import { OPCODE, ICloseFrame } from './typings';
@@ -18,24 +19,35 @@ export class Connection extends EventEmitter {
     private connCache: Connection[];
     private state: number;
 
-    constructor(socket: net.Socket, connections: Connection[]) {
+    constructor(socket: net.Socket, connections: Connection[], req?: http.ServerRequest) {
         super();
         this.socket = socket;
         this.connCache = connections;
         this.state = Connection.CONNECTING;
-        this.socket.once('data', data => {
-            if (this.handshake(data)) {
-                this.state = Connection.CONECTED;
-                this.connCache.push(this);
-                this.socket.on('data', this.onData.bind(this));
-                this.socket.on('error', this.onError.bind(this));
-                this.socket.on('end', this.onEnd.bind(this));
-                this.socket.on('close', this.onCLose.bind(this));
+
+        if (req) {
+            if (this.handshake(req.headers)) {
+                this.connect();
             }
-        });
+        } else {
+            this.socket.once('data', data => {
+                if (this.handshake(this.parseHttpHeaders(data))) {
+                    this.connect();
+                }
+            });
+        }
     }
 
-    private handshake(data: Buffer) {
+    private connect() {
+        this.state = Connection.CONECTED;
+        this.connCache.push(this);
+        this.socket.on('data', this.onData.bind(this));
+        this.socket.on('error', this.onError.bind(this));
+        this.socket.on('end', this.onEnd.bind(this));
+        this.socket.on('close', this.onCLose.bind(this));
+    }
+
+    private parseHttpHeaders(data: Buffer) {
         let lines = data.toString().split('\r\n');
         lines = lines.slice(1, lines.length - 2);
 
@@ -45,6 +57,10 @@ export class Connection extends EventEmitter {
             headers[key.toLowerCase()] = val;
         });
 
+        return headers;
+    }
+
+    private handshake(headers: any) {
         if (headers['upgrade'] == 'websocket' && headers['connection'] == 'Upgrade'
             && headers['sec-websocket-version'] == '13') {
             let key = this.sha1(headers['sec-websocket-key'] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");

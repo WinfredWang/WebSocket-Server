@@ -9,7 +9,7 @@
         window.addEventListener("load", function () {
             var nickname = prompt("Choose a nickname")
             if (nickname) {
-                connection = new WebSocket("ws://localhost:8124")
+                connection = new WebSocket("ws://localhost:3000")
                 connection.onopen = function () {
                     console.log("Connection opened")
                     connection.send(nickname)
